@@ -21,7 +21,9 @@ header{position:sticky;top:0;z-index:80;backdrop-filter:blur(18px);background:rg
 .ctrl{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink-soft);font-weight:600}
 .ctrl input[type=range]{width:100px;accent-color:var(--coral)}
 .ctrl .val{min-width:30px;text-align:center;color:var(--coral);font-weight:800}
-.voice-sel{border:1px solid var(--line);background:var(--cream);border-radius:10px;padding:6px 10px;font-size:12px;font-family:inherit;font-weight:600;max-width:170px}
+.voice-sel{border:1px solid var(--line);background:var(--cream);border-radius:10px;padding:6px 10px;font-size:12px;font-family:inherit;font-weight:600;max-width:220px;cursor:pointer}
+.voice-sel:disabled{opacity:.5;cursor:not-allowed}
+#voiceWarning{max-width:1120px;margin:10px auto 0;padding:10px 16px;border-radius:12px;font-size:13px;font-weight:600;line-height:1.5;border:1px solid #ffc978;display:none;transition:.2s}
 main{max-width:1120px;margin:0 auto;padding:14px 18px 30px}
 .tab-panel{display:none}
 .tab-panel.active{display:block}
@@ -199,13 +201,14 @@ main{max-width:1120px;margin:0 auto;padding:14px 18px 30px}
     <button data-tab="game">🚀 Trò chơi</button>
   </nav>
   <div class="ctrl">
-    <select class="voice-sel" id="voiceSel"></select>
+    <select class="voice-sel" id="voiceSel" title="Chọn giọng đọc tiếng Trung"></select>
     <span>🐢</span>
     <input type="range" id="rateSlider" min="0.45" max="1.25" step="0.05" value="0.80">
     <span>🐇</span>
     <span class="val" id="rateVal">0.80</span>
   </div>
 </header>
+<div id="voiceWarning"></div>
 <main>
   <section id="tab-learn" class="tab-panel active">
     <div class="lesson-bar" id="lessonBar"></div>
@@ -606,46 +609,160 @@ exercises:[
 {t:'fill',q:'我哥哥是___。',vi:'Điền từ',opts:['医生','照片','家人','谁'],a:0}]}
 ];
 
-/* ===== TTS ===== */
+/* =========================================================
+   TTS — CẢI THIỆN PHÁT ÂM
+   ========================================================= */
 var speechRate = 0.80;
 var voices = [];
 var selectedVoice = null;
 var TONE3_CHARS = new Set('我你好五九哪很小也有请走拐左远几想晚手水米买少老早草姐美冷等给起里语雨洗喜写雪短管反表点跑找讨巧挑两比把每领饼醒假敢嘴总桶孔纸者准简普广场底许久马挺角解楷酒舞举永敏锦');
-function textHasTone3(t){ for(var i=0;i<t.length;i++) if(TONE3_CHARS.has(t[i])) return true; return false; }
+
+// Từ có thanh nhẹ ở âm tiết thứ 2 — dễ bị TTS đọc sai
+var NEUTRAL_TONE_WORDS = [
+  '什么','怎么','这么','那么','多么','意思','认识','休息','知道',
+  '朋友','学生','先生','东西','衣服','告诉','麻烦','喜欢','照顾',
+  '时候','事情','地方','名字','明白','客气','关系','便宜','面包',
+  '苹果','孩子','日子','桌子','椅子','屋子','房子','鼻子','嘴巴',
+  '爸爸','妈妈','哥哥','姐姐','弟弟','妹妹','爷爷','奶奶','叔叔',
+  '阿姨','姑姑','舅舅','嫂嫂','娃娃','星星','宝宝','谢谢','对对'
+];
+
+function isChineseVoice(v){
+  if(!v) return false;
+  var lang = (v.lang || '').toLowerCase();
+  var name = (v.name || '').toLowerCase();
+  return /^zh/.test(lang) || /chinese|mandarin|普通话|中文|putonghua/i.test(name);
+}
+
+function isHighQualityChineseVoice(v){
+  if(!isChineseVoice(v)) return false;
+  return /Natural|Xiaoxiao|Yunxi|Yunjian|Xiaoyi|Google.*(中文|普通话|Mandarin)/i.test(v.name);
+}
+
 function pickBestVoice(){
   if(!('speechSynthesis' in window)) return;
   voices = speechSynthesis.getVoices();
   if(!voices.length) return;
-  var prefer = [/Microsoft Xiaoxiao.*Natural/i,/Microsoft Yunxi.*Natural/i,/Microsoft Yunjian.*Natural/i,/Microsoft Xiaoyi.*Natural/i,/Microsoft.*Xiaoxiao/i,/Microsoft.*Yaoyao/i,/Microsoft.*Huihui/i,/Google.*普通话/i,/Google.*Mandarin/i,/Ting-?Ting/i,/Mei-?Jia/i];
+  var zhVoices = voices.filter(isChineseVoice);
+  var prefer = [
+    /Microsoft Xiaoxiao.*Natural/i,
+    /Microsoft Yunxi.*Natural/i,
+    /Microsoft Yunjian.*Natural/i,
+    /Microsoft Xiaoyi.*Natural/i,
+    /Microsoft.*Xiaoxiao/i,
+    /Microsoft.*Yunxi/i,
+    /Microsoft.*Huihui/i,
+    /Microsoft.*Yaoyao/i,
+    /Google.*普通话.*中国大陆/i,
+    /Google.*中文.*普通话/i,
+    /Google.*Mandarin/i,
+    /Ting-?Ting/i,
+    /Mei-?Jia/i,
+    /Sinji/i
+  ];
+  selectedVoice = null;
   for(var i=0;i<prefer.length;i++){
-    var v = voices.find(function(vv){ return prefer[i].test(vv.name) || prefer[i].test(vv.lang); });
+    var pattern = prefer[i];
+    var v = zhVoices.find(function(vv){ return pattern.test(vv.name); });
     if(v){ selectedVoice = v; break; }
   }
-  if(!selectedVoice) selectedVoice = voices.find(function(v){ return /^zh/i.test(v.lang); }) || null;
+  if(!selectedVoice){
+    selectedVoice = zhVoices.find(function(v){ return /zh[-_]?cn/i.test(v.lang); })
+                 || zhVoices.find(function(v){ return /zh/i.test(v.lang); })
+                 || null;
+  }
   buildVoiceSelector();
+  updateVoiceWarning();
 }
+
 function buildVoiceSelector(){
   var sel = document.getElementById('voiceSel');
   sel.innerHTML = '';
-  var zh = voices.filter(function(v){ return /^zh|chinese|mandarin|普通话/i.test(v.lang + ' ' + v.name); });
-  if(!zh.length){ var o = document.createElement('option'); o.textContent = 'Mặc định'; sel.appendChild(o); return; }
-  zh.forEach(function(v){
+  var zhVoices = voices.filter(isChineseVoice);
+  if(!zhVoices.length){
+    var o = document.createElement('option');
+    o.textContent = 'Không có giọng tiếng Trung';
+    sel.appendChild(o);
+    sel.disabled = true;
+    return;
+  }
+  sel.disabled = false;
+  zhVoices.sort(function(a, b){
+    var aHQ = isHighQualityChineseVoice(a) ? 0 : 1;
+    var bHQ = isHighQualityChineseVoice(b) ? 0 : 1;
+    if(aHQ !== bHQ) return aHQ - bHQ;
+    return a.name.localeCompare(b.name);
+  });
+  zhVoices.forEach(function(v){
     var o = document.createElement('option');
     o.value = v.name;
-    o.textContent = v.name.replace(/Microsoft |Google /g,'').slice(0,28);
+    var shortName = v.name
+      .replace(/^Microsoft\s+/i, '')
+      .replace(/^Google\s+/i, '')
+      .replace(/\s*-\s*Chinese.*$/i, '')
+      .replace(/\s*\(.*\)\s*$/, '');
+    var tag = isHighQualityChineseVoice(v) ? ' ⭐' : '';
+    o.textContent = shortName + tag + ' — ' + v.lang;
     if(selectedVoice && v.name === selectedVoice.name) o.selected = true;
     sel.appendChild(o);
   });
-  sel.addEventListener('change', function(){
+  sel.onchange = function(){
     var v = voices.find(function(x){ return x.name === sel.value; });
-    if(v) selectedVoice = v;
-  });
+    if(v){
+      selectedVoice = v;
+      updateVoiceWarning();
+      setTimeout(function(){ speak('什么'); }, 200);
+    }
+  };
 }
+
+function updateVoiceWarning(){
+  var warn = document.getElementById('voiceWarning');
+  if(!warn) return;
+  if(!selectedVoice){
+    warn.style.display = 'block';
+    warn.style.background = 'rgba(255,117,147,.15)';
+    warn.style.color = '#a82040';
+    warn.style.borderColor = '#ff7593';
+    warn.innerHTML = '⚠️ <b>Không có giọng tiếng Trung.</b> Vui lòng cài gói ngôn ngữ Trung Quốc (Settings → Time & Language → Language → Add Chinese).';
+  } else if(!isHighQualityChineseVoice(selectedVoice)){
+    warn.style.display = 'block';
+    warn.style.background = 'rgba(255,201,120,.20)';
+    warn.style.color = '#7a4a00';
+    warn.style.borderColor = '#ffc978';
+    warn.innerHTML = '💡 Đang dùng: <b>' + selectedVoice.name.replace(/Microsoft\s+/i,'') + '</b>. Nếu nghe chưa chuẩn, thử chọn giọng có dấu ⭐ trong dropdown.';
+  } else {
+    warn.style.display = 'block';
+    warn.style.background = 'rgba(92,196,163,.15)';
+    warn.style.color = '#1c6b53';
+    warn.style.borderColor = '#b3e5d4';
+    warn.innerHTML = '✅ Đang dùng giọng chất lượng cao: <b>' + selectedVoice.name.replace(/Microsoft\s+/i,'').replace(/Google\s+/i,'') + '</b>';
+  }
+}
+
+function textHasTone3(t){
+  for(var i=0;i<t.length;i++) if(TONE3_CHARS.has(t[i])) return true;
+  return false;
+}
+
+function preprocessForTTS(text){
+  var result = text;
+  var sortedWords = NEUTRAL_TONE_WORDS.slice().sort(function(a,b){ return b.length - a.length; });
+  sortedWords.forEach(function(word){
+    if(result.indexOf(word) === -1) return;
+    var spaced = word.split('').join('\u200B');
+    var parts = result.split(word);
+    result = parts.join(spaced);
+  });
+  return result;
+}
+
 function speak(text, rateOverride){
   if(!('speechSynthesis' in window)) return;
   try{
     speechSynthesis.cancel();
-    var u = new SpeechSynthesisUtterance(text);
+    var processed = preprocessForTTS(text);
+    var u = new SpeechSynthesisUtterance(processed);
     u.lang = 'zh-CN';
     var rate = rateOverride || speechRate;
     var has3 = textHasTone3(text);
@@ -654,16 +771,20 @@ function speak(text, rateOverride){
     if(single && has3) rate = Math.max(0.42, rate * 0.62);
     else if(has3) rate = Math.max(0.50, rate * 0.78);
     else if(single) rate = Math.max(0.55, rate * 0.85);
-    u.rate = rate; u.pitch = 0.98;
+    u.rate = rate;
+    u.pitch = 1.0;
+    u.volume = 1;
     if(selectedVoice) u.voice = selectedVoice;
     speechSynthesis.speak(u);
   }catch(e){}
 }
+
 if('speechSynthesis' in window){
   pickBestVoice();
   speechSynthesis.onvoiceschanged = pickBestVoice;
   setTimeout(pickBestVoice, 100);
-  setTimeout(pickBestVoice, 800);
+  setTimeout(pickBestVoice, 500);
+  setTimeout(pickBestVoice, 1500);
 }
 var rateSlider = document.getElementById('rateSlider');
 var rateVal = document.getElementById('rateVal');
@@ -1047,19 +1168,16 @@ function initWriter(ch){
   freeStrokes = [];
   mode = 'animate';
 
-  // ✅ Xóa SVG cũ + span loading cũ
   writePadEl.querySelectorAll('svg').forEach(function(s){ s.remove(); });
   var loadingEl = writePadEl.querySelector('.loading');
   if(loadingEl) loadingEl.remove();
 
-  // ✅ Đảm bảo canvas + hint còn tồn tại
   if(!writePadEl.contains(freeCanvas)) writePadEl.appendChild(freeCanvas);
   if(!writePadEl.contains(freeModeHint)) writePadEl.appendChild(freeModeHint);
 
   updateModeUI();
 
   if(typeof HanziWriter === 'undefined'){
-    // Nếu CDN chưa load, chờ 500ms thử lại
     setTimeout(function(){
       if(typeof HanziWriter === 'undefined'){
         writePadEl.insertAdjacentHTML('afterbegin', '<div style="padding:30px;text-align:center;color:#a82040;font-size:13.5px;line-height:1.6">⚠️ Không tải được thư viện HanziWriter.<br>Vui lòng kiểm tra kết nối mạng và tải lại trang.</div>');
@@ -1169,10 +1287,7 @@ function updateModeUI(){
   if(mode === 'free'){
     freeCanvas.style.display = 'block';
     freeModeHint.classList.add('on');
-    // ✅ Ẩn hoàn toàn chữ mờ ở chế độ tự viết
-    if(svg){
-      svg.style.display = 'none';
-    }
+    if(svg){ svg.style.display = 'none'; }
     btnFree.classList.add('active-mode');
     btnClear.style.display = '';
     btnAnimate.style.display = 'none';
@@ -1248,7 +1363,6 @@ document.getElementById('btnSayChar').addEventListener('click', function(){
   speak(activeChar);
 });
 
-/* ===== Chỉ chấm điểm cho chế độ Luyện viết (theo nét) ===== */
 function showQuizScore(totalMistakes){
   scorePanel.classList.add('show');
   var total = quizStats.totalStrokes || 0;
@@ -1655,7 +1769,6 @@ G.rafId = requestAnimationFrame(gameLoop);
 window.addEventListener('load', function(){
   resizeGame();
   if('speechSynthesis' in window){ pickBestVoice(); setTimeout(pickBestVoice, 200); }
-  // Nếu tab write đang active → init
   setTimeout(function(){
     if(document.getElementById('tab-write').classList.contains('active')){
       if(!writer) initWriter(activeChar);
